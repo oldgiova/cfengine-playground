@@ -1,0 +1,102 @@
+#!/var/cfengine/bin/cf-agent --no-lock
+#body common control
+bundle agent __main__
+{
+  #bundlesequence => { "self_snap" };
+  methods:
+    "self_snap";
+}
+
+body contain in_shell 
+{
+  useshell => "true";
+} 
+
+body classes myresults(scope, class_prefix)
+{
+  scope => "$(scope)";
+
+  promise_kept => { "$(class_prefix)_reached",
+                    "$(class_prefix)_kept" };
+
+  promise_repaired => { "$(class_prefix)_reached",
+                        "$(class_prefix)_repaired" };
+
+  repair_failed => { "$(class_prefix)_reached",
+                     "$(class_prefix)_error",
+                     "$(class_prefix)_not_kept",
+                     "$(class_prefix)_failed" };
+
+  repair_denied => { "$(class_prefix)_reached",
+                     "$(class_prefix)_error",
+                     "$(class_prefix)_not_kept",
+                     "$(class_prefix)_denied" };
+
+  repair_timeout => { "$(class_prefix)_reached",
+                      "$(class_prefix)_error",
+                      "$(class_prefix)_not_kept",
+                      "$(class_prefix)_timeout" };
+}
+
+
+bundle agent self_snap {
+
+  vars: 
+    "system_update_command"   
+      #string => ifelse("redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt","debian","apt-get upgrade -y","Unknown");
+#      
+#      string => ifelse("redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
+#                       "redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
+#
+#			"debian","apt-get upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
+#			"echo UNKNOWN > ${sys.statedir}/system_update_command_status.txt");
+      string => "echo OK > ${sys.statedir}/system_update_command_status.txt";
+  
+  classes:
+    "maintenance_window"
+       #expression => "Thursday.Hr01.Min05_10";
+       expression => "Saturday";
+
+    "uptime_greater_than_1_week"
+       expression => isgreaterthan( "$(sys.uptime)", 10080 ),
+       comment => "We don't care to reboot unless we have been running for at least a week";
+
+    "have_snapshot_less_than_2_hours"
+       expression => returnszero( "/opt/nt/have_a_recent_snapshot.sh", useshell ),
+       comment => "This script could hit aws api, return 0 when there is a snapshot made within last2 hours."; 
+
+    "no_needs_reboot"
+       expression => returnszero( "needs-restarting", useshell ),
+       comment => "If returns 0, no need to reboot";
+
+    "up_to_date"
+       expression => returnszero( "yum check-update", useshell ),
+       comment => "If returns 0, the system is up to date";
+
+  commands:
+    !have_snapshot_less_than_2_hours::
+      "echo 'can take a snap' && /opt/nt/ec2snapshot.sh"
+        contain => in_shell;
+
+    have_snapshot_less_than_2_hours.!up_to_date::
+      "echo 'update'"
+        contain => in_shell;
+
+    have_snapshot_less_than_2_hours.!no_needs_reboot::
+      "echo 'reboot'"
+        contain => in_shell;
+   
+    have_snapshot_less_than_2_hours.uptime_greater_than_1_week::
+      "echo 'Old, reboot'"
+        contain => in_shell;
+    
+    #uptime_greater_than_1_week.maintenance_window_reboot_allowed::
+    #  "/opt/nt/ec2snapshot.sh && yum upgrade -y && echo reboot >> /tmp/snap.log"
+    #    contain => in_shell;
+
+
+#    ready_to_reboot::
+#      "/opt/nt/ec2snapshot.sh && yum upgrade -y && echo reboot >> /tmp/snap.log"
+#        contain => in_shell;
+}
+
