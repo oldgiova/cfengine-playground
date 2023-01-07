@@ -41,16 +41,22 @@ body classes myresults(scope, class_prefix)
 
 bundle agent self_snap {
 
+  packages:
+    debian::
+      "update-notifier-common"
+        policy => "present",
+        comment => "used to check if debian needs update";
+
   vars: 
     "system_update_command"   
-      #string => ifelse("redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt","debian","apt-get upgrade -y","Unknown");
-#      
-#      string => ifelse("redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
-#                       "redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
-#
-#			"debian","apt-get upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
-#			"echo UNKNOWN > ${sys.statedir}/system_update_command_status.txt");
-      string => "echo OK > ${sys.statedir}/system_update_command_status.txt";
+      string => ifelse("redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
+			"debian","apt-get upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
+			"echo UNKNOWN > ${sys.statedir}/system_update_command_status.txt");
+#      string => "echo OK > ${sys.statedir}/system_update_command_status.txt";
+    "system_update_check_command"
+      string => ifelse("redhat","yum check-update",
+			"debian","/usr/lib/update-notifier/apt-check 2>&1 | grep -v '0;0'",
+			"echo UNKNOWN");
   
   classes:
     "maintenance_window"
@@ -66,11 +72,11 @@ bundle agent self_snap {
        comment => "This script could hit aws api, return 0 when there is a snapshot made within last2 hours."; 
 
     "no_needs_reboot"
-       expression => returnszero( "needs-restarting", useshell ),
+       expression => returnszero( "test ! -f /var/run/reboot-required", useshell ),
        comment => "If returns 0, no need to reboot";
 
     "up_to_date"
-       expression => returnszero( "yum check-update", useshell ),
+       expression => returnszero( "$(system_update_check_command)", useshell ),
        comment => "If returns 0, the system is up to date";
 
   commands:
@@ -99,4 +105,5 @@ bundle agent self_snap {
 #      "/opt/nt/ec2snapshot.sh && yum upgrade -y && echo reboot >> /tmp/snap.log"
 #        contain => in_shell;
 }
+
 
