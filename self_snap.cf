@@ -12,31 +12,31 @@ body contain in_shell
   useshell => "true";
 } 
 
-body classes myresults(scope, class_prefix)
-{
-  scope => "$(scope)";
-
-  promise_kept => { "$(class_prefix)_reached",
-                    "$(class_prefix)_kept" };
-
-  promise_repaired => { "$(class_prefix)_reached",
-                        "$(class_prefix)_repaired" };
-
-  repair_failed => { "$(class_prefix)_reached",
-                     "$(class_prefix)_error",
-                     "$(class_prefix)_not_kept",
-                     "$(class_prefix)_failed" };
-
-  repair_denied => { "$(class_prefix)_reached",
-                     "$(class_prefix)_error",
-                     "$(class_prefix)_not_kept",
-                     "$(class_prefix)_denied" };
-
-  repair_timeout => { "$(class_prefix)_reached",
-                      "$(class_prefix)_error",
-                      "$(class_prefix)_not_kept",
-                      "$(class_prefix)_timeout" };
-}
+#body classes myresults(scope, class_prefix)
+#{
+#  scope => "$(scope)";
+#
+#  promise_kept => { "$(class_prefix)_reached",
+#                    "$(class_prefix)_kept" };
+#
+#  promise_repaired => { "$(class_prefix)_reached",
+#                        "$(class_prefix)_repaired" };
+#
+#  repair_failed => { "$(class_prefix)_reached",
+#                     "$(class_prefix)_error",
+#                     "$(class_prefix)_not_kept",
+#                     "$(class_prefix)_failed" };
+#
+#  repair_denied => { "$(class_prefix)_reached",
+#                     "$(class_prefix)_error",
+#                     "$(class_prefix)_not_kept",
+#                     "$(class_prefix)_denied" };
+#
+#  repair_timeout => { "$(class_prefix)_reached",
+#                      "$(class_prefix)_error",
+#                      "$(class_prefix)_not_kept",
+#                      "$(class_prefix)_timeout" };
+#}
 
 
 bundle agent self_snap {
@@ -49,14 +49,20 @@ bundle agent self_snap {
 
   vars: 
     "system_update_command"   
-      string => ifelse("redhat","yum upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
-			"debian","apt-get upgrade -y && echo OK > ${sys.statedir}/system_update_command_status.txt",
-			"echo UNKNOWN > ${sys.statedir}/system_update_command_status.txt");
-#      string => "echo OK > ${sys.statedir}/system_update_command_status.txt";
+      string => ifelse("redhat","yum upgrade -y",
+			"debian","apt-get upgrade -y",
+			"yum upgrade -y");
+
     "system_update_check_command"
-      string => ifelse("redhat","yum check-update",
-			"debian","/usr/lib/update-notifier/apt-check 2>&1 | grep -v '0;0'",
-			"echo UNKNOWN");
+      string => ifelse("redhat","yum update && yum check-update > /dev/null 2>&1",
+			"debian","apt-get update && /usr/lib/update-notifier/apt-check 2>&1 | grep -v '0;0'",
+			"yum update && yum check-update > /dev/null 2>&1");
+ 
+    "system_reboot_command"
+      string => ifelse("redhat","systemctl --message=\"CFEngine reboot, will be back in 30 minutes\" reboot",
+			"debian","systemctl --message=\"CFEngine reboot, will be back in 30 minutes\" reboot",
+			"systemctl --message=\"CFEngine reboot, will be back in 30 minutes\" reboot");
+    
   
   classes:
     "maintenance_window"
@@ -80,30 +86,21 @@ bundle agent self_snap {
        comment => "If returns 0, the system is up to date";
 
   commands:
-    !have_snapshot_less_than_2_hours::
-      "echo 'can take a snap' && /opt/nt/ec2snapshot.sh"
+    maintenance_window.!have_snapshot_less_than_2_hours::
+      "echo 'INFO - taking snapshot' && /opt/nt/ec2snapshot.sh"
         contain => in_shell;
 
-    have_snapshot_less_than_2_hours.!up_to_date::
-      "echo 'update'"
+    maintenance_window.have_snapshot_less_than_2_hours.!up_to_date::
+      "$(system_update_command)"
         contain => in_shell;
 
-    have_snapshot_less_than_2_hours.!no_needs_reboot::
-      "echo 'reboot'"
+    maintenance_window.have_snapshot_less_than_2_hours.!no_needs_reboot::
+      "$(system_reboot_command)"
         contain => in_shell;
    
-    have_snapshot_less_than_2_hours.uptime_greater_than_1_week::
-      "echo 'Old, reboot'"
+    maintenance_window.have_snapshot_less_than_2_hours.uptime_greater_than_1_week::
+      "$(system_reboot_command)"
         contain => in_shell;
-    
-    #uptime_greater_than_1_week.maintenance_window_reboot_allowed::
-    #  "/opt/nt/ec2snapshot.sh && yum upgrade -y && echo reboot >> /tmp/snap.log"
-    #    contain => in_shell;
-
-
-#    ready_to_reboot::
-#      "/opt/nt/ec2snapshot.sh && yum upgrade -y && echo reboot >> /tmp/snap.log"
-#        contain => in_shell;
 }
 
 
